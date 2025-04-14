@@ -18,6 +18,11 @@ const ResumeReview = ({ resume, token, onBack }) => {
   const [error, setError] = useState(null);
 
   const handleFinalize = async () => {
+    if (!jdUrl.trim()) {
+      setError("Job Description URL is required.");
+      return;
+    }
+
     setFinalizing(true);
     setError(null);
     try {
@@ -150,12 +155,16 @@ const ResumeReview = ({ resume, token, onBack }) => {
       {renderBullets("experience_third", "Experience Section 3")}
 
       <Form.Group className="mb-4">
-        <Form.Label>Job Description URL (optional)</Form.Label>
+        <Form.Label>Job Description URL</Form.Label>
         <Form.Control
           type="text"
           value={jdUrl}
           onChange={(e) => setJdUrl(e.target.value)}
+          isInvalid={jdUrl.trim() === "" && error?.includes("Job Description URL")}
         />
+        <Form.Control.Feedback type="invalid">
+          This field is required.
+        </Form.Control.Feedback>
       </Form.Group>
 
       <Row className="mb-4">

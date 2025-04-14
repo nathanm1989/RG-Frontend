@@ -11,16 +11,21 @@ import {
   Card,
   Table,
   Form,
+  Pagination,
 } from "react-bootstrap";
 
 const Dashboard = ({ mode = "bidder", bidderId = null }) => {
   const { user, logout } = useAuth();
-  const [fileMap, setFileMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [resumeData, setResumeData] = useState([]);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10); // Or 20, up to you
+  const [totalPages, setTotalPages] = useState(1);
+  const [dateCounts, setDateCounts] = useState({});
 
   const fetchFiles = async () => {
     setLoading(true);
@@ -29,8 +34,8 @@ const Dashboard = ({ mode = "bidder", bidderId = null }) => {
     try {
       const endpoint =
         mode === "bidder"
-          ? `${process.env.REACT_APP_BACKEND_URL}/api/bidder/files`
-          : `${process.env.REACT_APP_BACKEND_URL}/api/dev/bidder-files/${bidderId}`;
+          ? `${process.env.REACT_APP_BACKEND_URL}/api/bidder/files?page=${page}&limit=${limit}`
+          : `${process.env.REACT_APP_BACKEND_URL}/api/dev/bidder-files/${bidderId}?page=${page}&limit=${limit}`;
 
       const res = await fetch(endpoint, {
         headers: {
@@ -47,7 +52,9 @@ const Dashboard = ({ mode = "bidder", bidderId = null }) => {
       const data = await res.json();
 
       if (res.ok) {
-        setFileMap(data); // { date: [ { name, jdUrl }, ... ] }
+        setResumeData(data.files || []);
+        setTotalPages(data.totalPages || 1); // { date: [ { name, jdUrl }, ... ] }
+        setDateCounts(data.dateCounts || {});
       } else {
         setError(data.message || "Failed to load files");
       }
@@ -57,7 +64,7 @@ const Dashboard = ({ mode = "bidder", bidderId = null }) => {
     } finally {
       setLoading(false);
     }
-  };
+  };  
 
   const handleDelete = async (url) => {
     if (!window.confirm("Are you sure you want to delete this file?")) return;
@@ -132,21 +139,18 @@ const Dashboard = ({ mode = "bidder", bidderId = null }) => {
 
   const normalize = (str) => str.toLowerCase().replace(/[\s\-_]/g, "");
 
-  const filteredFileMap = Object.entries(fileMap)
-    .filter(([date]) => {
-      const afterStart = !startDate || date >= startDate;
-      const beforeEnd = !endDate || date <= endDate;
-      return afterStart && beforeEnd;
-    })
-    .reduce((acc, [date, files]) => {
-      const filteredFiles = files.filter((file) =>
-        normalize(file.name).includes(normalize(searchTerm))
-      );
-      if (filteredFiles.length > 0) {
-        acc[date] = filteredFiles;
-      }
-      return acc;
-    }, {});
+  const filteredFiles = resumeData.filter((file) => {
+    const matchesName = normalize(file.name).includes(normalize(searchTerm));
+    const afterStart = !startDate || file.date >= startDate;
+    const beforeEnd = !endDate || file.date <= endDate;
+    return matchesName && afterStart && beforeEnd;
+  });
+
+  const dateCountMap = filteredFiles.reduce((acc, file) => {
+    acc[file.date] = (acc[file.date] || 0) + 1;
+    return acc;
+  }, {});
+
 
   const secureDownload = async (name, extension) => {
     try {
@@ -183,8 +187,9 @@ const Dashboard = ({ mode = "bidder", bidderId = null }) => {
   useEffect(() => {
     if (mode === "developer" && !bidderId) return;
     fetchFiles();
+    window.scrollTo({ top: 0, behavior: "smooth" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bidderId]);
+  }, [page, limit, bidderId]);
 
   return (
     <Container className="my-4">
@@ -250,84 +255,126 @@ const Dashboard = ({ mode = "bidder", bidderId = null }) => {
         </div>
       ) : error ? (
         <Alert variant="danger">{error}</Alert>
-      ) : Object.keys(filteredFileMap).length === 0 ? (
+      ) : Object.keys(filteredFiles).length === 0 ? (
         <p>No resumes match your filters.</p>
       ) : (
-        Object.entries(filteredFileMap).map(([date, files]) => (
-          <Card key={date} className="mb-4 shadow-sm">
-            <Card.Header as="h5">
-              {date} -{" "}
-              <small className="text-muted">{files.length} file(s)</small>
-            </Card.Header>
-            <Card.Body>
-              <Table striped bordered hover responsive>
-                <thead>
-                  <tr>
-                    <th>Resume (.docx)</th>
-                    <th>Job Description (.txt)</th>
-                    <th>JD URL</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {files.map((file) => {
-                    return (
-                      <tr key={file.url}>
-                        <td>
-                          <Button
-                            variant="outline-primary"
-                            size="sm"
-                            onClick={() => secureDownload(file.name, ".docx")}
-                          >
-                            {file.name}.docx
-                          </Button>
-                        </td>
-                        <td>
-                          <Button
-                            variant="outline-primary"
-                            size="sm"
-                            onClick={() => secureDownload(file.name, ".txt")}
-                          >
-                            {file.name}.txt
-                          </Button>
-                        </td>
-                        <td>
-                          {file.jdUrl ? (
-                            <a
-                              href={file.jdUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              View JD
-                            </a>
-                          ) : (
-                            <span className="text-muted">N/A</span>
-                          )}
-                        </td>
-                        <td>
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => handleDelete(file.name)}
-                          >
-                            Delete
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </Table>
+        <Table striped bordered hover responsive>
+          <thead>
+            <tr>
+              <th>Resume (.docx)</th>
+              <th>Job Description (.txt)</th>
+              <th>JD URL</th>
+              <th>Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredFiles.map((file, idx) => {
+              const currDate = file.date;
+              const nextDate = filteredFiles[idx + 1]?.date;
+              const isLastOfDate = currDate !== nextDate;
 
-              <div className="mt-3">
-                <Button variant="success" onClick={() => downloadZip(date)}>
-                  ⬇️ Download All for {date}
-                </Button>
-              </div>
-            </Card.Body>
-          </Card>
-        ))
+              return (
+                <tr key={`${file.name}-${idx}`}>
+                  <td>
+                    <Button
+                      variant="outline-primary"
+                      size="sm"
+                      onClick={() => secureDownload(file.name, ".docx")}
+                    >
+                      {file.name}.docx
+                    </Button>
+                  </td>
+                  <td>
+                    <Button
+                      variant="outline-primary"
+                      size="sm"
+                      onClick={() => secureDownload(file.name, ".txt")}
+                    >
+                      {file.name}.txt
+                    </Button>
+                  </td>
+                  <td>
+                    {file.jdUrl ? (
+                      <a href={file.jdUrl} target="_blank" rel="noreferrer">
+                        View JD
+                      </a>
+                    ) : (
+                      <span className="text-muted">N/A</span>
+                    )}
+                  </td>
+                  <td>{file.date}</td>
+                  <td>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => handleDelete(file.name)}
+                    >
+                      Delete
+                    </Button>
+
+                    {isLastOfDate && (
+                      <div className="mt-2">
+                        <Button
+                          size="sm"
+                          variant="success"
+                          onClick={() => downloadZip(file.date)}
+                        >
+                          ⬇️ Download All for {file.date} (Total {dateCounts[file.date] || 0})
+                        </Button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
       )}
+      <Form.Group className="mb-3 d-flex justify-content-end align-items-center gap-2">
+        <Form.Label className="mb-0">Rows per page:</Form.Label>
+        <Form.Select
+          size="sm"
+          value={limit}
+          onChange={(e) => {
+            setLimit(parseInt(e.target.value));
+            setPage(1); // reset to first page when limit changes
+          }}
+          style={{ width: "100px" }}
+        >
+          <option value="10">10</option>
+          <option value="20">20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </Form.Select>
+      </Form.Group>
+      {totalPages > 1 && (
+        <div className="d-flex justify-content-center my-4">
+          <Pagination>
+            <Pagination.Prev
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+            />
+
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
+              <Pagination.Item
+                key={pg}
+                active={pg === page}
+                onClick={() => setPage(pg)}
+              >
+                {pg}
+              </Pagination.Item>
+            ))}
+
+            <Pagination.Next
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            />
+          </Pagination>
+        </div>
+      )}
+
+
     </Container>
   );
 };
